@@ -1,19 +1,46 @@
-# discord_bot.py - VERSIONE COMPLETA E CORRETTA
+# discord_bot.py - VERSIONE FINALE CON PORTA FITTIZIA PER RENDER GRATIS
 import os
 import json
 import asyncio
+import threading
+import time
+from datetime import datetime
+
+# ==================== SERVER WEB FITTIZIO PER RENDER ====================
+# Questo "inganna" Render facendogli credere che è un sito web
+# Così possiamo usare il piano gratuito di Render (Web Service)
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 AI Uncensored Ultra Bot - ONLINE 24/7"
+
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
+def run_web_server():
+    """Avvia il server web fittizio su porta 10000 (quella di Render)"""
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+# Avvia il server web in un thread separato PRIMA di tutto
+threading.Thread(target=run_web_server, daemon=True).start()
+print("🌐 Server web fittizio avviato per ingannare Render")
+
+# ==================== LIBRERIE DISCORD ====================
 import discord
 from discord.ext import commands
 from discord import app_commands
 import google.generativeai as genai
-import time
-from datetime import datetime
 
 # ==================== CONFIGURAZIONE ====================
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
-CHANNEL_LINK = "https://discord.gg/tuo_server"  # CAMBIA CON IL TUO LINK
+CHANNEL_LINK = "https://discord.gg/tuo_server"  # CAMBIA CON IL LINK DEL TUO SERVER
 PAYPAL_LINK = "https://www.paypal.me/BotAi36"
-ADMIN_ID = 1311131640  # IL TUO ID DISCORD (cambialo con il tuo)
+ADMIN_ID = 1311131640  # IL TUO ID DISCORD (cambialo con il tuo!)
 
 # 🔑 MULTI-API KEY SYSTEM
 GEMINI_API_KEYS = [
@@ -154,8 +181,8 @@ def calculate_scalability():
 
 # ==================== SETUP BOT DISCORD ====================
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents.message_content = True  # Serve per leggere i messaggi
+intents.members = True          # Serve per eventi membri
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -503,6 +530,21 @@ async def slash_italian(interaction: discord.Interaction):
     user_preferences[user_id]['language'] = 'italian'
     await interaction.response.send_message("🇮🇹 Italiano attivato!")
 
+@bot.tree.command(name="credits", description="Check your credits")
+async def slash_credits(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    credits = get_user_credits(user_id)
+    await interaction.response.send_message(f"💰 You have {credits} credits")
+
+@bot.tree.command(name="myid", description="Get your User ID")
+async def slash_myid(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`")
+
+@bot.tree.command(name="status", description="API Status")
+async def slash_status(interaction: discord.Interaction):
+    scalability = calculate_scalability()
+    await interaction.response.send_message(f"📊 Active Keys: {scalability['active_keys']}/{len(GEMINI_API_KEYS)}")
+
 # ==================== FUNZIONI AI ====================
 def get_system_prompt_and_params(user_id):
     pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
@@ -535,6 +577,10 @@ async def on_message(message):
     
     user_id = message.author.id
     user_text = message.content
+    
+    # Evita di processare messaggi troppo corti o vuoti
+    if len(user_text.strip()) < 2:
+        return
     
     try:
         pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
@@ -593,7 +639,6 @@ async def on_message(message):
                 
     except Exception as e:
         print(f"AI Error: {str(e)}")
-        await message.channel.send(f"❌ Error: {str(e)[:100]}")
 
 # ==================== COMANDI ADMIN ====================
 @bot.command(name='addcredits')
@@ -627,10 +672,12 @@ if __name__ == '__main__':
     print("🤖 AI Uncensored Ultra Discord Bot Starting...")
     print(f"🔑 Loaded {len(GEMINI_API_KEYS)} API Keys")
     print("✨ 4 FREE Credits for New Users!")
+    print("🌐 Server web fittizio attivo - Render pensa sia un sito web!")
     print("🚀 Starting bot...")
     
     if not DISCORD_TOKEN:
         print("❌ DISCORD_TOKEN mancante!")
         exit(1)
     
+    # Avvia il bot
     bot.run(DISCORD_TOKEN)
