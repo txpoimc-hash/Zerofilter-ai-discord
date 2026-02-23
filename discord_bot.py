@@ -1,4 +1,4 @@
-# discord_bot.py - VERSIONE FINALE CON ON_MESSAGE CORRETTA
+# discord_bot.py - VERSIONE FINALE CON SUPPORTO DM E SERVER
 import os
 import json
 import asyncio
@@ -21,7 +21,6 @@ def health_check():
     return "OK", 200
 
 def run_web_server():
-    """Server web leggero - consuma meno risorse"""
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=False)
 
@@ -30,7 +29,6 @@ print("🌐 Server web leggero attivo")
 
 # ==================== LOGGING CONFIGURATION ====================
 def setup_logging():
-    """Configura logging dettagliato per debug"""
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
@@ -103,8 +101,6 @@ ETHEREUM_ADDRESS = "0x2e7edD5154Be461bae0BD9F79473FC54B0eeEE59"
 
 # ==================== API KEY MANAGER ====================
 class APIKeyManager:
-    """Gestione intelligente delle API keys"""
-    
     def __init__(self, api_keys):
         self.api_keys = [key for key in api_keys if key]
         self.key_status = {}
@@ -120,7 +116,6 @@ class APIKeyManager:
         logger.info(f"🔑 API Key Manager inizializzato con {len(self.api_keys)} chiavi")
     
     def get_key(self):
-        """Ottiene una chiave valida"""
         with self.lock:
             now = time.time()
             
@@ -158,7 +153,6 @@ class APIKeyManager:
             return self.api_keys[0] if self.api_keys else None
     
     def mark_failed(self, key, error_msg=""):
-        """Segna una chiave come fallita"""
         with self.lock:
             if key in self.key_status:
                 status = self.key_status[key]
@@ -176,14 +170,12 @@ class APIKeyManager:
                 )
     
     def mark_success(self, key):
-        """Registra un successo"""
         with self.lock:
             if key in self.key_status:
                 self.key_status[key]['failures'] = 0
                 self.key_status[key]['failed'] = False
     
     def get_stats(self):
-        """Ottieni statistiche"""
         with self.lock:
             now = time.time()
             stats = {
@@ -210,11 +202,11 @@ class RateLimiter:
         self.guild_commands: Dict[int, list] = defaultdict(list)
         self.global_commands: list = []
         
-        self.USER_LIMIT = 3
+        self.USER_LIMIT = 5
         self.USER_WINDOW = 10
-        self.GUILD_LIMIT = 15
+        self.GUILD_LIMIT = 20
         self.GUILD_WINDOW = 30
-        self.GLOBAL_LIMIT = 50
+        self.GLOBAL_LIMIT = 60
         self.GLOBAL_WINDOW = 60
         
         logger.info("⚙️ RateLimiter inizializzato")
@@ -231,6 +223,8 @@ class RateLimiter:
         return True
     
     def check_guild_limit(self, guild_id: int) -> bool:
+        if guild_id == 0:
+            return True
         now = time.time()
         self.guild_commands[guild_id] = [
             t for t in self.guild_commands[guild_id] 
@@ -260,7 +254,7 @@ class RateLimiter:
             await ctx.send("⏳ Troppi comandi in esecuzione globalmente. Riprova tra poco.")
             return False
         
-        if guild_id and not self.check_guild_limit(guild_id):
+        if not self.check_guild_limit(guild_id):
             await ctx.send(f"⏳ Troppi comandi in questo server. Riprova tra poco.")
             return False
         
@@ -275,7 +269,6 @@ class AntiKickProtection(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.join_times = {}
-        self.message_counts = {}
         logger.info("🛡️ AntiKickProtection attivata")
     
     @commands.Cog.listener()
@@ -286,6 +279,13 @@ class AntiKickProtection(commands.Cog):
             status=discord.Status.online
         )
         logger.info(f"🌐 In {len(self.bot.guilds)} server")
+        
+        # Sincronizza i comandi slash (FIX per 404 Unknown interaction)
+        try:
+            synced = await self.bot.tree.sync()
+            logger.info(f"✅ Sincronizzati {len(synced)} comandi slash")
+        except Exception as e:
+            logger.error(f"❌ Errore sincronizzazione comandi slash: {e}")
     
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
@@ -295,7 +295,7 @@ class AntiKickProtection(commands.Cog):
         await asyncio.sleep(45)
         
         welcome_channel = None
-        for channel_name in ['welcome', 'generale', 'generale', 'chat', 'main', 'bot-comandi', 'bot']:
+        for channel_name in ['welcome', 'generale', 'chat', 'main', 'bot-comandi', 'bot']:
             channel = discord.utils.get(guild.text_channels, name=channel_name)
             if channel and channel.permissions_for(guild.me).send_messages:
                 welcome_channel = channel
@@ -316,21 +316,11 @@ class AntiKickProtection(commands.Cog):
                     "• 🔓 Modalità uncensored\n"
                     "• 🎨 Scrittura creativa\n"
                     "• ⚡ Supporto tecnico\n\n"
-                    "**Comandi principali:**\n"
-                    "• `!help` - Mostra tutti i comandi\n"
-                    "• `!credits` - Controlla i tuoi crediti\n"
-                    "• `!uncensored` - Attiva modalità senza censura\n\n"
-                    "**Canali consigliati:**\n"
-                    "Puoi usarmi in qualsiasi canale testuale dove ho i permessi di leggere e scrivere!"
+                    "**Comandi:** `!help`"
                 ),
                 color=discord.Color.green()
             )
-            embed.set_footer(text="✨ Scrivimi qualcosa in chat!")
             await welcome_channel.send(embed=embed)
-    
-    @commands.Cog.listener()
-    async def on_guild_remove(self, guild):
-        logger.warning(f"❌ Bot rimosso da {guild.name}")
 
 # ==================== FUNZIONI CREDITI ====================
 def load_credits():
@@ -725,15 +715,14 @@ async def status_cmd(ctx):
     
     await ctx.send(embed=embed)
 
-# ==================== COMANDO TEST API (SOLO ADMIN) ====================
+# ==================== COMANDO TEST API ====================
 @bot.command(name='testapi')
 async def test_api(ctx):
-    """Testa tutte le API keys (solo admin)"""
     if ctx.author.id != ADMIN_ID:
         await ctx.send("❌ Comando solo per admin")
         return
     
-    await ctx.send("🔍 Test delle API keys in corso... (ci vorrà qualche secondo)")
+    await ctx.send("🔍 Test delle API keys in corso...")
     
     working_keys = 0
     failed_keys_list = []
@@ -767,13 +756,7 @@ async def test_api(ctx):
             failed_keys_list.append(f"Key {i+1}: {error_msg}")
             api_key_manager.mark_failed(key, error_msg)
     
-    await ctx.send(f"📊 Risultato finale: {working_keys}/{len(GEMINI_API_KEYS)} keys funzionanti")
-    
-    if failed_keys_list:
-        error_text = "\n".join(failed_keys_list[:5])
-        if len(failed_keys_list) > 5:
-            error_text += f"\n... e {len(failed_keys_list)-5} altri"
-        await ctx.send(f"❌ Errori:\n{error_text}")
+    await ctx.send(f"📊 Risultato: {working_keys}/{len(GEMINI_API_KEYS)} keys funzionanti")
 
 # ==================== COMANDI SLASH ====================
 @bot.tree.command(name="start", description="Mostra il messaggio di benvenuto")
@@ -809,12 +792,7 @@ async def slash_credits(interaction: discord.Interaction):
 async def slash_myid(interaction: discord.Interaction):
     await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`")
 
-@bot.tree.command(name="status", description="API Status")
-async def slash_status(interaction: discord.Interaction):
-    stats = api_key_manager.get_stats()
-    await interaction.response.send_message(f"📊 API Keys: {stats['active_keys']}/{stats['total_keys']} attive")
-
-# ==================== FUNZIONI AI CON DEBUG SICURO ====================
+# ==================== FUNZIONI AI ====================
 def get_system_prompt_and_params(user_id):
     pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
     language = pref.get('language', 'english')
@@ -827,141 +805,109 @@ def get_system_prompt_and_params(user_id):
     full_prompt = f"{UNCENSORED_PROMPT}\n\n{language_instructions[language]}"
     return full_prompt, GENERATION_CONFIG.copy()
 
+# ==================== ON_MESSAGE CORRETTO (supporta DM e Server) ====================
 @bot.event
 async def on_message(message):
-    # ==================== DEBUG SICURO (senza errori) ====================
-    print(f"\n🔍🔍🔍 DEBUG MESSAGGIO RICEVUTO 🔍🔍🔍")
+    # ==================== DEBUG INIZIALE ====================
+    print(f"\n🔍🔍🔍 MESSAGGIO RICEVUTO 🔍🔍🔍")
     print(f"   Autore: {message.author} (ID: {message.author.id})")
-    print(f"   È un bot? {message.author.bot}")
     print(f"   Contenuto: '{message.content}'")
     print(f"   Inizia con '!': {message.content.startswith('!')}")
     
-    # GESTIONE SICURA del canale (senza errori)
+    # Gestione sicura del canale
     channel_name = getattr(message.channel, 'name', 'DM')
-    channel_id = getattr(message.channel, 'id', 'N/A')
-    print(f"   Canale: #{channel_name} (ID: {channel_id})")
+    print(f"   Canale: #{channel_name}")
     
-    guild_name = getattr(message.guild, 'name', 'DM')
-    guild_id = getattr(message.guild, 'id', 'N/A')
-    print(f"   Server: {guild_name} (ID: {guild_id})")
-    
-    print(f"   Tipo canale: {message.channel.type}")
-    
-    # Permessi solo se in un server
-    if message.guild:
-        permissions = message.channel.permissions_for(message.guild.me)
-        print(f"   Permessi bot: Invia messaggi={permissions.send_messages}, Leggi={permissions.read_messages}")
-    else:
-        print(f"   Permessi bot: N/A (DM)")
-    
-    print(f"   Timestamp: {datetime.now().strftime('%H:%M:%S')}")
+    guild_name = getattr(message.guild, 'name', 'DM Privato')
+    print(f"   Server: {guild_name}")
     print("="*50)
     
-    # Logga anche su file (in modo sicuro)
-    safe_channel = getattr(message.channel, 'name', 'DM')
-    logger.info(f"MSG: {message.author} in #{safe_channel}: '{message.content[:50]}...'")
+    # Log su file
+    logger.info(f"MSG: {message.author} in #{channel_name}: '{message.content[:50]}...'")
     
-    # ==================== LOGICA PRINCIPALE ====================
-    # Ignora messaggi del bot stesso
+    # ==================== IGNORA BOT ====================
     if message.author.bot:
-        print("   ⏭️ Ignorato: il messaggio è di un bot")
+        print("   ⏭️ Ignorato: è un bot")
         return
     
-    # Processa i comandi (quelli che iniziano con !)
-    print("   🔄 Chiamata a bot.process_commands...")
+    # ==================== PROCESSA COMANDI ====================
     await bot.process_commands(message)
-    print("   ✅ Comandi processati")
     
-    # Se è un comando, esci (per non processare due volte)
+    # Se è un comando, esci
     if message.content.startswith('!'):
-        print("   ⏭️ È un comando, esco (non processare come messaggio normale)")
+        print("   ⏭️ È un comando, esco")
         return
     
-    # Ignora messaggi in DM (vogliamo solo nei server)
-    if not message.guild:
-        print("   ⏭️ Messaggio in DM, ignoro (il bot funziona solo nei server)")
-        return
-    
-    print("   ➡️ PROCESSO COME MESSAGGIO NORMALE...")
-    
-    # Rate limiting per messaggi normali
+    # ==================== RATE LIMITING ====================
     user_id = message.author.id
     now = time.time()
     
     if not hasattr(bot, 'last_message_time'):
         bot.last_message_time = {}
-        print("   📊 Inizializzato last_message_time")
     
     if user_id in bot.last_message_time:
         time_diff = now - bot.last_message_time[user_id]
-        print(f"   ⏱️ Ultimo messaggio di questo utente: {time_diff:.1f} secondi fa")
         if time_diff < 2:
-            print(f"   ⏭️ Rate limit: troppo presto (limite 2 secondi)")
+            print(f"   ⏭️ Rate limit: {time_diff:.1f}s < 2s")
             return
-    else:
-        print(f"   📊 Primo messaggio di questo utente")
     
     bot.last_message_time[user_id] = now
-    print(f"   ✅ Timestamp aggiornato: {now}")
     
-    user_text = message.content
-    print(f"   📝 Testo da processare: '{user_text[:100]}...' (lunghezza: {len(user_text)})")
-    
-    if len(user_text.strip()) < 2:
-        print(f"   ⏭️ Testo troppo corto (minimo 2 caratteri)")
+    # ==================== TESTO TROPPO CORTO ====================
+    user_text = message.content.strip()
+    if len(user_text) < 2:
+        print("   ⏭️ Testo troppo corto")
         return
     
-    print(f"   🔍 Inizio elaborazione AI...")
+    # ==================== VERIFICA PERMESSI (solo se in server) ====================
+    if message.guild:
+        permissions = message.channel.permissions_for(message.guild.me)
+        print(f"   🔑 Permessi in #{channel_name}: send={permissions.send_messages}, read={permissions.read_messages}")
+        
+        if not permissions.send_messages or not permissions.read_messages:
+            print("   ❌ Permessi insufficienti nel canale")
+            # Prova a mandare un avviso in un canale dove ha permessi
+            for channel in message.guild.text_channels:
+                if channel.permissions_for(message.guild.me).send_messages:
+                    await channel.send(f"⚠️ Non ho permessi per rispondere in #{channel_name}")
+                    break
+            return
     
+    print("   ✅ Inizio elaborazione AI...")
+    
+    # ==================== ELABORAZIONE AI ====================
     try:
-        # Ottieni preferenze utente
+        # Preferenze utente
         pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
-        language = pref.get('language', 'english')
         mode = pref.get('mode', 'uncensored')
         cost = 2 if mode in ['uncensored', 'creative'] else 3
-        print(f"   👤 Preferenze utente - Lingua: {language}, Modalità: {mode}, Costo: {cost}")
         
-        # Controlla crediti
+        # Crediti
         credits = get_user_credits(user_id)
-        print(f"   💰 Crediti utente: {credits}")
+        print(f"   💰 Crediti: {credits}, costo: {cost}")
         
         if credits < cost:
-            print(f"   ❌ Crediti insufficienti: {credits} < {cost}")
             await message.channel.send(f"❌ Need {cost} credits! Use `!buy`")
             return
         
-        # Deduci crediti
         success, remaining = deduct_credits(user_id, cost)
         if not success:
-            print(f"   ❌ Transazione crediti fallita")
             return
         
-        print(f"   ✅ Crediti detratti, rimanenti: {remaining}")
-        
-        # Mostra che sta scrivendo
+        # API Key
         async with message.channel.typing():
-            print(f"   ⌨️ Bot sta scrivendo...")
-            
-            # Ottieni API key
             api_key = api_key_manager.get_key()
             if not api_key:
-                print(f"   ❌ Nessuna API key disponibile")
                 await message.channel.send("🚨 API keys temporarily unavailable.")
                 add_credits(user_id, cost)
                 return
             
-            print(f"   🔑 API key usata: {api_key[:10]}...")
+            print(f"   🔑 Usando API key: {api_key[:10]}...")
             
             try:
-                # Configura Gemini
-                print(f"   ⚙️ Configurazione Gemini...")
                 genai.configure(api_key=api_key)
                 system_prompt, ai_params = get_system_prompt_and_params(user_id)
-                print(f"   📋 System prompt pronto ({len(system_prompt)} caratteri)")
-                print(f"   🎛️ Parametri AI: temp={ai_params['temperature']}, max_tokens={ai_params['max_output_tokens']}")
                 
-                # Crea modello
-                print(f"   🤖 Creazione modello gemini-2.5-flash...")
                 model = genai.GenerativeModel(
                     'gemini-2.5-flash',
                     generation_config=genai.types.GenerationConfig(
@@ -972,12 +918,8 @@ async def on_message(message):
                     ),
                     safety_settings=SAFETY_SETTINGS
                 )
-                print(f"   ✅ Modello creato")
                 
-                # Chiamata a Gemini con timeout
-                print(f"   🌐 Invio richiesta a Gemini (timeout 30s)...")
-                start_time = time.time()
-                
+                print("   🌐 Invio richiesta a Gemini...")
                 response = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
                         None,
@@ -986,69 +928,38 @@ async def on_message(message):
                     timeout=30.0
                 )
                 
-                elapsed = time.time() - start_time
-                print(f"   ✅ Risposta ricevuta in {elapsed:.2f} secondi")
-                
-                # Verifica che la risposta non sia vuota
                 if not response or not response.text:
-                    print(f"   ⚠️ Risposta vuota da Gemini")
-                    await message.channel.send("⚠️ L'AI ha restituito una risposta vuota. Riprova.")
-                    add_credits(user_id, cost)
-                    return
+                    raise Exception("Risposta vuota")
                 
                 ai_response = response.text
-                print(f"   📄 Risposta AI: {len(ai_response)} caratteri")
-                print(f"   📝 Anteprima: {ai_response[:100]}...")
-                
-                # Marca come successo
                 api_key_manager.mark_success(api_key)
-                print(f"   ✅ API key marcata come successo")
                 
-                # Gestione risposte lunghe
+                # Invio risposta
                 if len(ai_response) <= 1900:
-                    print(f"   📨 Invio risposta (singolo messaggio)")
                     await message.channel.send(f"{ai_response}\n\n💳 Cost: {cost} | Balance: {remaining}")
                 else:
-                    print(f"   📨 Invio risposta in {len(ai_response)//1900 + 1} parti")
                     parts = [ai_response[i:i+1900] for i in range(0, len(ai_response), 1900)]
                     for i, part in enumerate(parts):
                         if i == len(parts) - 1:
-                            print(f"      📨 Parte {i+1}/{len(parts)} (finale)")
                             await message.channel.send(f"{part}\n\n💳 Cost: {cost} | Balance: {remaining}")
                         else:
-                            print(f"      📨 Parte {i+1}/{len(parts)}")
                             await message.channel.send(part)
                 
-                print(f"   ✅ Messaggio inviato con successo")
+                print(f"   ✅ Risposta inviata")
                 
             except asyncio.TimeoutError:
-                print(f"   ⏳ TIMEOUT: Richiesta a Gemini troppo lunga")
                 api_key_manager.mark_failed(api_key, "Timeout")
-                await message.channel.send("⏳ Richiesta troppo lunga, riprova con un messaggio più breve.")
+                await message.channel.send("⏳ Richiesta troppo lunga, riprova.")
                 add_credits(user_id, cost)
                 
-            except Exception as api_error:
-                error_msg = str(api_error)
-                print(f"   🔴 ERRORE API: {error_msg[:200]}")
-                api_key_manager.mark_failed(api_key, error_msg)
-                
-                # Messaggi utente più specifici
-                if "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                    await message.channel.send("⚠️ Limite API raggiunto. Riprova tra qualche minuto.")
-                elif "permission" in error_msg.lower() or "access" in error_msg.lower():
-                    await message.channel.send("❌ Errore di autorizzazione API. Contatta l'admin.")
-                elif "invalid" in error_msg.lower():
-                    await message.channel.send("❌ API key non valida.")
-                elif "not found" in error_msg.lower() or "404" in error_msg:
-                    await message.channel.send("❌ Modello AI non trovato. Verifica la configurazione.")
-                else:
-                    await message.channel.send("🔴 Servizio temporaneamente non disponibile. Riprova.")
-                
+            except Exception as e:
+                api_key_manager.mark_failed(api_key, str(e))
+                await message.channel.send("🔴 Errore AI. Riprova.")
                 add_credits(user_id, cost)
                 
     except Exception as e:
-        print(f"   ❌ ERRORE GENERALE in on_message: {str(e)}")
-        logger.error(f"❌ Errore in on_message: {str(e)}", exc_info=True)
+        print(f"   ❌ Errore: {e}")
+        logger.error(f"Errore in on_message: {e}")
 
 # ==================== COMANDI ADMIN ====================
 @bot.command(name='addcredits')
@@ -1072,50 +983,10 @@ async def stats_admin(ctx):
     
     embed = discord.Embed(title="📊 STATS", color=discord.Color.gold())
     embed.add_field(name="👥 Utenti", value=total_users)
-    embed.add_field(name="💰 Crediti totali", value=total_credits)
-    embed.add_field(name="🔑 API Keys attive", value=f"{stats['active_keys']}/{stats['total_keys']}")
-    embed.add_field(name="❌ API Keys fallite", value=stats['failed_keys'])
+    embed.add_field(name="💰 Crediti", value=total_credits)
+    embed.add_field(name="🔑 API Keys", value=f"{stats['active_keys']}/{stats['total_keys']}")
     
     await ctx.send(embed=embed)
-
-@bot.command(name='guilds')
-async def guilds_admin(ctx):
-    if ctx.author.id != ADMIN_ID:
-        return
-    
-    guilds_list = []
-    for guild in bot.guilds:
-        guilds_list.append(f"• {guild.name} (ID: {guild.id}) - {guild.member_count} members")
-    
-    guilds_text = "\n".join(guilds_list) if guilds_list else "Nessun server"
-    
-    if len(guilds_text) > 1900:
-        parts = [guilds_text[i:i+1900] for i in range(0, len(guilds_text), 1900)]
-        for i, part in enumerate(parts):
-            await ctx.send(f"**Server {i+1}/{len(parts)}:**\n{part}")
-    else:
-        await ctx.send(f"**Server connessi ({len(bot.guilds)}):**\n{guilds_text}")
-
-# ==================== COMANDO PER VEDERE I LOG (SOLO ADMIN) ====================
-@bot.command(name='logs')
-async def view_logs(ctx, lines: int = 20):
-    """Mostra gli ultimi log (solo admin)"""
-    if ctx.author.id != ADMIN_ID:
-        await ctx.send("❌ No permission")
-        return
-    
-    try:
-        with open('logs/bot_debug.log', 'r') as f:
-            all_lines = f.readlines()
-            last_lines = all_lines[-lines:]
-            log_text = "".join(last_lines)
-            
-            if len(log_text) > 1900:
-                log_text = log_text[-1900:]
-            
-            await ctx.send(f"📋 Ultimi {lines} log:\n```\n{log_text}\n```")
-    except Exception as e:
-        await ctx.send(f"❌ Errore lettura log: {e}")
 
 # ==================== AVVIO BOT ====================
 if __name__ == '__main__':
@@ -1124,17 +995,13 @@ if __name__ == '__main__':
     logger.info(f"🔑 Loaded {len(GEMINI_API_KEYS)} API Keys")
     logger.info("✨ 4 FREE Credits for New Users!")
     logger.info("🛡️ Anti-kick protection: ACTIVE")
-    logger.info("⚙️ Rate limiting: ACTIVE")
     logger.info("🤖 Modello: gemini-2.5-flash")
-    logger.info("📊 Debug mode: COMPLETO (tutti i messaggi vengono loggati)")
+    logger.info("📱 Supporto DM: ATTIVO")
     logger.info("="*50)
     
     if not DISCORD_TOKEN:
         logger.critical("❌ DISCORD_TOKEN mancante!")
         exit(1)
     
-    # Aggiungi il cog AntiKickProtection
     asyncio.run(bot.add_cog(AntiKickProtection(bot)))
-    
-    # Avvia il bot
     bot.run(DISCORD_TOKEN, log_handler=None)
