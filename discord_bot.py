@@ -1,4 +1,4 @@
-# discord_bot.py - VERSIONE ULTRA-PROTETTA ANTI-KICK
+# discord_bot.py - VERSIONE ULTRA-PROTETTA CON API MANAGER MIGLIORATO
 import os
 import json
 import asyncio
@@ -9,25 +9,26 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# ==================== SERVER WEB FITTIZIO PER RENDER ====================
+# ==================== SERVER WEB FITTIZIO LEGGERO ====================
 from flask import Flask
 
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "🤖 AI Uncensored Ultra Bot - ONLINE 24/7"
-
 @app.route('/ping')
-def ping():
-    return "pong", 200
+@app.route('/health')
+def health_check():
+    return "OK", 200
 
 def run_web_server():
+    """Server web leggero - consuma meno risorse"""
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # threaded=False per ridurre consumo risorse
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=False)
 
+# Avvia in thread separato
 threading.Thread(target=run_web_server, daemon=True).start()
-print("🌐 Server web fittizio avviato per ingannare Render")
+print("🌐 Server web leggero attivo (ottimizzato)")
 
 # ==================== LOGGING CONFIGURATION ====================
 def setup_logging():
@@ -81,7 +82,7 @@ CHANNEL_LINK = "https://discord.gg/tuo_server"  # CAMBIA CON IL TUO LINK
 PAYPAL_LINK = "https://www.paypal.me/BotAi36"
 ADMIN_ID = 1311131640  # IL TUO ID DISCORD
 
-# 🔑 MULTI-API KEY SYSTEM
+# 🔑 MULTI-API KEY SYSTEM CON GESTIONE MIGLIORATA
 GEMINI_API_KEYS = [
     os.environ.get('GEMINI_API_KEY_1'),
     os.environ.get('GEMINI_API_KEY_2'),
@@ -91,6 +92,7 @@ GEMINI_API_KEYS = [
     os.environ.get('GEMINI_API_KEY_6'),
 ]
 
+# Filtra chiavi valide
 GEMINI_API_KEYS = [key for key in GEMINI_API_KEYS if key and key.startswith('AIza')]
 
 if not DISCORD_TOKEN:
@@ -106,14 +108,134 @@ logger.info(f"✅ Caricate {len(GEMINI_API_KEYS)} API keys")
 # ==================== FILE CREDITI ====================
 CREDIT_FILE = "user_credits.json"
 
-# 🔄 API Key Rotation System
-current_key_index = 0
-failed_keys = {}
-KEY_RETRY_DELAY = 3600  # 1 ora
-
 # Indirizzi Crypto
 BITCOIN_ADDRESS = "19rgimxDy1FKW5RvXWPQN4u9eevKySmJTu"
 ETHEREUM_ADDRESS = "0x2e7edD5154Be461bae0BD9F79473FC54B0eeEE59"
+
+# ==================== API KEY MANAGER AVANZATO ====================
+class APIKeyManager:
+    """Gestione intelligente delle API keys con backoff esponenziale"""
+    
+    def __init__(self, api_keys):
+        self.api_keys = [key for key in api_keys if key]  # Rimuove None
+        self.key_status = {}
+        for key in self.api_keys:
+            self.key_status[key] = {
+                'failed': False,
+                'retry_time': 0,
+                'failures': 0,
+                'last_used': 0
+            }
+        self.current_index = 0
+        self.lock = threading.Lock()
+        self.total_requests = 0
+        self.successful_requests = 0
+        logger.info(f"🔑 API Key Manager inizializzato con {len(self.api_keys)} chiavi")
+    
+    def get_key(self):
+        """Ottiene una chiave valida con gestione intelligente"""
+        with self.lock:
+            now = time.time()
+            
+            # Se tutte le chiavi sono fallite, resetta dopo 5 minuti
+            all_failed = all(
+                status['failed'] and now < status['retry_time'] 
+                for status in self.key_status.values()
+            )
+            
+            if all_failed:
+                logger.warning("⚠️ Tutte le chiavi fallite, resetting after 5 minutes")
+                for key in self.key_status:
+                    self.key_status[key]['failed'] = False
+                    self.key_status[key]['retry_time'] = 0
+                    self.key_status[key]['failures'] = 0
+            
+            # Prova tutte le chiavi in ordine
+            start_index = self.current_index
+            for i in range(len(self.api_keys)):
+                idx = (start_index + i) % len(self.api_keys)
+                key = self.api_keys[idx]
+                status = self.key_status[key]
+                
+                # Controlla se la chiave è temporaneamente disabilitata
+                if status['failed'] and now < status['retry_time']:
+                    continue
+                
+                # Resetta lo stato failed se è passato il tempo di retry
+                if status['failed'] and now >= status['retry_time']:
+                    status['failed'] = False
+                    status['failures'] = 0
+                    logger.info(f"🔄 Riabilitata chiave {key[:10]}...")
+                
+                # Aggiorna indice e statistiche
+                self.current_index = (idx + 1) % len(self.api_keys)
+                status['last_used'] = now
+                return key
+            
+            # Se arrivi qui, tutte le chiavi sono fallite - usa la prima e spera
+            logger.error("🔥 Nessuna chiave disponibile, uso la prima")
+            return self.api_keys[0] if self.api_keys else None
+    
+    def mark_failed(self, key, error_msg=""):
+        """Segna una chiave come fallita con backoff esponenziale"""
+        with self.lock:
+            if key in self.key_status:
+                status = self.key_status[key]
+                status['failures'] += 1
+                
+                # Backoff esponenziale: 30s, 2min, 5min, 15min, 30min, 1h
+                wait_times = [30, 120, 300, 900, 1800, 3600]
+                failures = min(status['failures'], len(wait_times)) - 1
+                wait_time = wait_times[failures]
+                
+                status['failed'] = True
+                status['retry_time'] = time.time() + wait_time
+                
+                logger.warning(
+                    f"🔴 Key {key[:10]}... fallita (tentativo #{status['failures']}). "
+                    f"Riprovo tra {wait_time}s. Errore: {error_msg[:50]}"
+                )
+    
+    def mark_success(self, key):
+        """Registra un successo per la chiave"""
+        with self.lock:
+            if key in self.key_status:
+                # Reset dei fallimenti dopo un successo
+                self.key_status[key]['failures'] = 0
+                self.key_status[key]['failed'] = False
+                self.successful_requests += 1
+            self.total_requests += 1
+    
+    def get_stats(self):
+        """Ottieni statistiche sulle chiavi"""
+        with self.lock:
+            now = time.time()
+            stats = {
+                'total_keys': len(self.api_keys),
+                'active_keys': 0,
+                'failed_keys': 0,
+                'keys_detail': []
+            }
+            
+            for key in self.api_keys:
+                status = self.key_status[key]
+                is_active = not status['failed'] or now >= status['retry_time']
+                if is_active:
+                    stats['active_keys'] += 1
+                else:
+                    stats['failed_keys'] += 1
+                
+                stats['keys_detail'].append({
+                    'prefix': key[:10],
+                    'active': is_active,
+                    'failures': status['failures'],
+                    'retry_in': max(0, status['retry_time'] - now) if status['failed'] else 0
+                })
+            
+            return stats
+
+# Inizializza API Key Manager
+api_key_manager = APIKeyManager(GEMINI_API_KEYS)
 
 # ==================== RATE LIMITER ANTI-KICK ====================
 class RateLimiter:
@@ -375,28 +497,6 @@ def deduct_credits(user_id, amount):
         return True, credits_data[user_id]
     return False, current
 
-# ==================== API KEY ROTATION ====================
-def get_next_gemini_key():
-    global current_key_index
-    
-    for _ in range(len(GEMINI_API_KEYS)):
-        key = GEMINI_API_KEYS[current_key_index]
-        current_key_index = (current_key_index + 1) % len(GEMINI_API_KEYS)
-        
-        if key in failed_keys:
-            if time.time() - failed_keys[key] < KEY_RETRY_DELAY:
-                continue
-            else:
-                del failed_keys[key]
-        
-        return key
-    
-    return None
-
-def mark_key_failed(key):
-    failed_keys[key] = time.time()
-    logger.error(f"🔴 Key failed: {key[:20]}...")
-
 # ==================== CONFIGURAZIONE AI ====================
 GENERATION_CONFIG = {
     "temperature": 0.9,
@@ -471,6 +571,8 @@ async def start(ctx):
 `!btc` - Pay with Bitcoin
 `!eth` - Pay with Ethereum
 `!status` - Check API status
+`!testapi` - Test API keys (admin)
+`!diagnosi` - Diagnostica completa
 
 **Language Selection:**
 `!english` - Switch to English
@@ -511,6 +613,8 @@ async def help_cmd(ctx):
 `!btc` - Bitcoin payment
 `!eth` - Ethereum payment
 `!status` - Check API status
+`!testapi` - Test API keys
+`!diagnosi` - Diagnostica
     """, inline=False)
     embed.add_field(name="⚡ Features", value="""
 • Multi-API System for reliability
@@ -748,13 +852,157 @@ async def status_cmd(ctx):
     if not await rate_limiter.process_command(ctx):
         return
     
-    active_keys = len([k for k in GEMINI_API_KEYS if k not in failed_keys])
+    stats = api_key_manager.get_stats()
     
     embed = discord.Embed(
         title="📊 MULTI-API SYSTEM STATUS",
         color=discord.Color.teal()
     )
-    embed.add_field(name="🔑 API Keys", value=f"Active: {active_keys}/{len(GEMINI_API_KEYS)}", inline=True)
+    embed.add_field(name="🔑 Total Keys", value=stats['total_keys'], inline=True)
+    embed.add_field(name="✅ Active Keys", value=stats['active_keys'], inline=True)
+    embed.add_field(name="❌ Failed Keys", value=stats['failed_keys'], inline=True)
+    
+    # Dettaglio chiavi
+    details = ""
+    for k in stats['keys_detail']:
+        status_emoji = "✅" if k['active'] else "⏳" if k['retry_in'] > 0 else "❌"
+        details += f"{status_emoji} {k['prefix']}... "
+        if k['retry_in'] > 0:
+            details += f"(riprova tra {int(k['retry_in'])}s)"
+        details += "\n"
+    
+    if details:
+        embed.add_field(name="📝 Dettaglio Chiavi", value=details[:1000], inline=False)
+    
+    await ctx.send(embed=embed)
+
+# ==================== NUOVI COMANDI DI DIAGNOSI ====================
+@bot.command(name='testapi')
+async def test_api(ctx):
+    """Testa tutte le API keys (solo admin)"""
+    if ctx.author.id != ADMIN_ID:
+        await ctx.send("❌ Comando solo per admin")
+        return
+    
+    await ctx.send("🔍 Test delle API keys in corso... (ci vorrà qualche secondo)")
+    
+    working_keys = 0
+    failed_keys_list = []
+    
+    for i, key in enumerate(GEMINI_API_KEYS):
+        try:
+            # Test rapido con timeout
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # Richiesta molto piccola con timeout
+            response = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, 
+                    lambda: model.generate_content(
+                        "Say 'OK'",
+                        generation_config=genai.types.GenerationConfig(max_output_tokens=5)
+                    )
+                ),
+                timeout=10.0
+            )
+            
+            if response and response.text:
+                working_keys += 1
+                await ctx.send(f"✅ Key {i+1}: FUNZIONANTE ({key[:10]}...)")
+                api_key_manager.mark_success(key)
+            else:
+                failed_keys_list.append(f"Key {i+1}: risposta vuota")
+                api_key_manager.mark_failed(key, "Risposta vuota")
+                
+        except asyncio.TimeoutError:
+            failed_keys_list.append(f"Key {i+1}: timeout")
+            api_key_manager.mark_failed(key, "Timeout")
+        except Exception as e:
+            error_msg = str(e)[:50]
+            failed_keys_list.append(f"Key {i+1}: {error_msg}")
+            api_key_manager.mark_failed(key, error_msg)
+    
+    await ctx.send(f"📊 Risultato finale: {working_keys}/{len(GEMINI_API_KEYS)} keys funzionanti")
+    
+    if failed_keys_list:
+        # Mostra solo i primi 5 errori
+        error_text = "\n".join(failed_keys_list[:5])
+        if len(failed_keys_list) > 5:
+            error_text += f"\n... e {len(failed_keys_list)-5} altri"
+        await ctx.send(f"❌ Errori:\n{error_text}")
+
+@bot.command(name='diagnosi')
+async def diagnosi(ctx):
+    """Diagnostica completa del bot"""
+    embed = discord.Embed(
+        title="🔬 DIAGNOSI COMPLETA BOT",
+        color=discord.Color.orange(),
+        timestamp=datetime.now()
+    )
+    
+    # Stato API Keys
+    stats = api_key_manager.get_stats()
+    embed.add_field(name="🔑 API Keys", 
+                   value=f"Totali: {stats['total_keys']}\nAttive: {stats['active_keys']}\nFallite: {stats['failed_keys']}", 
+                   inline=True)
+    
+    # Stato crediti
+    credits_data = load_credits()
+    total_users = len(credits_data)
+    total_credits = sum(credits_data.values())
+    embed.add_field(name="💰 Crediti", 
+                   value=f"Utenti: {total_users}\nTotali: {total_credits}\nMedia: {total_credits/max(total_users,1):.1f}", 
+                   inline=True)
+    
+    # Stato server
+    embed.add_field(name="🌐 Server", 
+                   value=f"Connessi: {len(bot.guilds)}\nMembri totali: {sum(g.member_count for g in bot.guilds)}", 
+                   inline=True)
+    
+    # Test rapido API (solo con prima chiave)
+    try:
+        genai.configure(api_key=GEMINI_API_KEYS[0])
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Timeout breve
+        response = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: model.generate_content(
+                    "Ciao",
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=5)
+                )
+            ),
+            timeout=5.0
+        )
+        
+        if response and response.text:
+            embed.add_field(name="🤖 Test AI", value="✅ FUNZIONANTE", inline=True)
+        else:
+            embed.add_field(name="🤖 Test AI", value="⚠️ Risposta vuota", inline=True)
+    except asyncio.TimeoutError:
+        embed.add_field(name="🤖 Test AI", value="⏳ Timeout", inline=True)
+    except Exception as e:
+        embed.add_field(name="🤖 Test AI", value=f"❌ Errore: {str(e)[:20]}", inline=True)
+    
+    # Rate limiter stats
+    embed.add_field(name="⚙️ Rate Limiter", value="✅ Attivo", inline=True)
+    
+    # Anti-kick stats
+    if hasattr(bot, 'anti_kick'):
+        embed.add_field(name="🛡️ Anti-kick", value="✅ Attivo", inline=True)
+    
+    # Sistema
+    import psutil
+    process = psutil.Process()
+    memory_usage = process.memory_info().rss / 1024 / 1024  # in MB
+    cpu_usage = process.cpu_percent()
+    embed.add_field(name="💻 Risorse", 
+                   value=f"RAM: {memory_usage:.1f} MB\nCPU: {cpu_usage:.1f}%", 
+                   inline=True)
+    
+    embed.set_footer(text=f"ID Bot: {bot.user.id}")
     
     await ctx.send(embed=embed)
 
@@ -797,6 +1045,13 @@ async def slash_credits(interaction: discord.Interaction):
 async def slash_myid(interaction: discord.Interaction):
     await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`")
 
+@bot.tree.command(name="status", description="API Status")
+async def slash_status(interaction: discord.Interaction):
+    stats = api_key_manager.get_stats()
+    await interaction.response.send_message(
+        f"📊 API Keys: {stats['active_keys']}/{stats['total_keys']} attive"
+    )
+
 # ==================== FUNZIONI AI ====================
 def get_system_prompt_and_params(user_id):
     pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
@@ -812,6 +1067,9 @@ def get_system_prompt_and_params(user_id):
 
 @bot.event
 async def on_message(message):
+    # DEBUG base (commenta se non serve)
+    # print(f"\n🔍 Messaggio da {message.author}: {message.content[:50]}...")
+    
     if message.author.bot:
         return
     
@@ -823,17 +1081,16 @@ async def on_message(message):
     if not message.guild:
         return
     
-    # Rate limiting per messaggi normali (non comandi)
+    # Rate limiting per messaggi normali
     user_id = message.author.id
     now = time.time()
     
-    # Limite molto basso per messaggi normali
-    if hasattr(bot, 'last_message_time'):
-        if user_id in bot.last_message_time:
-            if now - bot.last_message_time[user_id] < 3:  # 3 secondi tra messaggi
-                return
-    else:
+    if not hasattr(bot, 'last_message_time'):
         bot.last_message_time = {}
+    
+    if user_id in bot.last_message_time:
+        if now - bot.last_message_time[user_id] < 2:  # 2 secondi tra messaggi
+            return
     
     bot.last_message_time[user_id] = now
     
@@ -857,9 +1114,10 @@ async def on_message(message):
             return
         
         async with message.channel.typing():
-            api_key = get_next_gemini_key()
-            if api_key is None:
-                await message.channel.send("🚨 API keys exhausted, try later")
+            # Ottieni chiave dal manager
+            api_key = api_key_manager.get_key()
+            if not api_key:
+                await message.channel.send("🚨 API keys temporarily unavailable. Riprova tra poco.")
                 add_credits(user_id, cost)
                 return
             
@@ -878,9 +1136,21 @@ async def on_message(message):
                     safety_settings=SAFETY_SETTINGS
                 )
                 
-                response = model.generate_content(f"{system_prompt}\n\nUser: {user_text}")
+                # Timeout di 30 secondi
+                response = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: model.generate_content(f"{system_prompt}\n\nUser: {user_text}")
+                    ),
+                    timeout=30.0
+                )
+                
                 ai_response = response.text
                 
+                # Registra successo
+                api_key_manager.mark_success(api_key)
+                
+                # Gestione risposte lunghe
                 if len(ai_response) <= 1900:
                     await message.channel.send(f"{ai_response}\n\n💳 Cost: {cost} | Balance: {remaining}")
                 else:
@@ -891,13 +1161,32 @@ async def on_message(message):
                         else:
                             await message.channel.send(part)
                             
+            except asyncio.TimeoutError:
+                error_msg = "Timeout della richiesta a Gemini"
+                logger.error(f"⏳ {error_msg}")
+                api_key_manager.mark_failed(api_key, error_msg)
+                await message.channel.send("⏳ Richiesta troppo lunga, riprova con un messaggio più breve.")
+                add_credits(user_id, cost)
+                
             except Exception as api_error:
-                mark_key_failed(api_key)
-                await message.channel.send("🔴 Service unavailable, try again")
+                error_msg = str(api_error)
+                logger.error(f"🔴 Errore API: {error_msg[:200]}")
+                api_key_manager.mark_failed(api_key, error_msg)
+                
+                # Messaggi utente più specifici
+                if "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                    await message.channel.send("⚠️ Limite API raggiunto. Riprova tra qualche minuto.")
+                elif "permission" in error_msg.lower() or "access" in error_msg.lower():
+                    await message.channel.send("❌ Errore di autorizzazione API. Contatta l'admin.")
+                elif "invalid" in error_msg.lower():
+                    await message.channel.send("❌ API key non valida.")
+                else:
+                    await message.channel.send("🔴 Servizio temporaneamente non disponibile. Riprova.")
+                
                 add_credits(user_id, cost)
                 
     except Exception as e:
-        logger.error(f"AI Error: {str(e)}")
+        logger.error(f"❌ Errore generale in on_message: {str(e)}")
 
 # ==================== COMANDI ADMIN ====================
 @bot.command(name='addcredits')
@@ -918,13 +1207,13 @@ async def stats_admin(ctx):
     credits_data = load_credits()
     total_users = len(credits_data)
     total_credits = sum(credits_data.values())
-    active_keys = len([k for k in GEMINI_API_KEYS if k not in failed_keys])
+    stats = api_key_manager.get_stats()
     
-    embed = discord.Embed(title="📊 STATS", color=discord.Color.gold())
-    embed.add_field(name="👥 Users", value=total_users)
-    embed.add_field(name="💰 Credits", value=total_credits)
-    embed.add_field(name="🔑 API Keys", value=f"{active_keys}/{len(GEMINI_API_KEYS)}")
-    embed.add_field(name="📝 Failed Keys", value=len(failed_keys))
+    embed = discord.Embed(title="📊 STATS AGGIORNATE", color=discord.Color.gold())
+    embed.add_field(name="👥 Utenti", value=total_users)
+    embed.add_field(name="💰 Crediti totali", value=total_credits)
+    embed.add_field(name="🔑 API Keys attive", value=f"{stats['active_keys']}/{stats['total_keys']}")
+    embed.add_field(name="❌ API Keys fallite", value=stats['failed_keys'])
     
     await ctx.send(embed=embed)
 
@@ -955,7 +1244,9 @@ if __name__ == '__main__':
     logger.info("✨ 4 FREE Credits for New Users!")
     logger.info("🛡️ Anti-kick protection: ACTIVE")
     logger.info("⚙️ Rate limiting: ACTIVE")
-    logger.info("🌐 Server web fittizio: ACTIVE")
+    logger.info("🔑 API Key Manager: ACTIVE (con backoff esponenziale)")
+    logger.info("🌐 Server web leggero: ACTIVE")
+    logger.info("📊 Comandi diagnostici: !testapi, !diagnosi, !status")
     logger.info("="*50)
     
     if not DISCORD_TOKEN:
@@ -964,6 +1255,7 @@ if __name__ == '__main__':
     
     # Aggiungi il cog AntiKickProtection
     asyncio.run(bot.add_cog(AntiKickProtection(bot)))
+    bot.anti_kick = True  # Per riferimento
     
     # Avvia il bot
-    bot.run(DISCORD_TOKEN, log_handler=None)  # Disabilita logging default di discord.py
+    bot.run(DISCORD_TOKEN, log_handler=None)
