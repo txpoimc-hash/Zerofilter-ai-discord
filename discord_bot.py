@@ -1,4 +1,4 @@
-# discord_bot.py - VERSIONE FINALE CON DEBUG COMPLETO
+# discord_bot.py - VERSIONE FINALE CON ON_MESSAGE CORRETTA
 import os
 import json
 import asyncio
@@ -34,38 +34,27 @@ def setup_logging():
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
-    # File handler per errori
     file_handler = logging.FileHandler('logs/bot_errors.log')
     file_handler.setLevel(logging.ERROR)
     
-    # File handler per debug
     debug_handler = logging.FileHandler('logs/bot_debug.log')
     debug_handler.setLevel(logging.DEBUG)
     
-    # File handler per messaggi (NUOVO!)
-    messages_handler = logging.FileHandler('logs/messages.log')
-    messages_handler.setLevel(logging.INFO)
-    
-    # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
-    # Formatter
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     file_handler.setFormatter(formatter)
     debug_handler.setFormatter(formatter)
-    messages_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     
-    # Configura root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(debug_handler)
-    root_logger.addHandler(messages_handler)
     root_logger.addHandler(console_handler)
     
     return root_logger
@@ -306,7 +295,7 @@ class AntiKickProtection(commands.Cog):
         await asyncio.sleep(45)
         
         welcome_channel = None
-        for channel_name in ['welcome', 'general', 'chat', 'main', 'bot-commands']:
+        for channel_name in ['welcome', 'generale', 'generale', 'chat', 'main', 'bot-comandi', 'bot']:
             channel = discord.utils.get(guild.text_channels, name=channel_name)
             if channel and channel.permissions_for(guild.me).send_messages:
                 welcome_channel = channel
@@ -327,10 +316,16 @@ class AntiKickProtection(commands.Cog):
                     "• 🔓 Modalità uncensored\n"
                     "• 🎨 Scrittura creativa\n"
                     "• ⚡ Supporto tecnico\n\n"
-                    "**Comandi:** `!help`"
+                    "**Comandi principali:**\n"
+                    "• `!help` - Mostra tutti i comandi\n"
+                    "• `!credits` - Controlla i tuoi crediti\n"
+                    "• `!uncensored` - Attiva modalità senza censura\n\n"
+                    "**Canali consigliati:**\n"
+                    "Puoi usarmi in qualsiasi canale testuale dove ho i permessi di leggere e scrivere!"
                 ),
                 color=discord.Color.green()
             )
+            embed.set_footer(text="✨ Scrivimi qualcosa in chat!")
             await welcome_channel.send(embed=embed)
     
     @commands.Cog.listener()
@@ -804,7 +799,22 @@ async def slash_italian(interaction: discord.Interaction):
     user_preferences[user_id]['language'] = 'italian'
     await interaction.response.send_message("🇮🇹 Italiano attivato!")
 
-# ==================== FUNZIONI AI CON DEBUG COMPLETO ====================
+@bot.tree.command(name="credits", description="Check your credits")
+async def slash_credits(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    credits = get_user_credits(user_id)
+    await interaction.response.send_message(f"💰 You have {credits} credits")
+
+@bot.tree.command(name="myid", description="Get your User ID")
+async def slash_myid(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`")
+
+@bot.tree.command(name="status", description="API Status")
+async def slash_status(interaction: discord.Interaction):
+    stats = api_key_manager.get_stats()
+    await interaction.response.send_message(f"📊 API Keys: {stats['active_keys']}/{stats['total_keys']} attive")
+
+# ==================== FUNZIONI AI CON DEBUG SICURO ====================
 def get_system_prompt_and_params(user_id):
     pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
     language = pref.get('language', 'english')
@@ -819,21 +829,37 @@ def get_system_prompt_and_params(user_id):
 
 @bot.event
 async def on_message(message):
-    # ==================== DEBUG COMPLETO ====================
+    # ==================== DEBUG SICURO (senza errori) ====================
     print(f"\n🔍🔍🔍 DEBUG MESSAGGIO RICEVUTO 🔍🔍🔍")
     print(f"   Autore: {message.author} (ID: {message.author.id})")
     print(f"   È un bot? {message.author.bot}")
     print(f"   Contenuto: '{message.content}'")
     print(f"   Inizia con '!': {message.content.startswith('!')}")
-    print(f"   Canale: #{message.channel.name if message.channel else 'DM'} (ID: {message.channel.id if message.channel else 'N/A'})")
-    print(f"   Server: {message.guild.name if message.guild else 'DM'} (ID: {message.guild.id if message.guild else 'N/A'})")
+    
+    # GESTIONE SICURA del canale (senza errori)
+    channel_name = getattr(message.channel, 'name', 'DM')
+    channel_id = getattr(message.channel, 'id', 'N/A')
+    print(f"   Canale: #{channel_name} (ID: {channel_id})")
+    
+    guild_name = getattr(message.guild, 'name', 'DM')
+    guild_id = getattr(message.guild, 'id', 'N/A')
+    print(f"   Server: {guild_name} (ID: {guild_id})")
+    
     print(f"   Tipo canale: {message.channel.type}")
-    print(f"   Permessi bot in questo canale: {message.channel.permissions_for(message.guild.me) if message.guild else 'N/A'}")
+    
+    # Permessi solo se in un server
+    if message.guild:
+        permissions = message.channel.permissions_for(message.guild.me)
+        print(f"   Permessi bot: Invia messaggi={permissions.send_messages}, Leggi={permissions.read_messages}")
+    else:
+        print(f"   Permessi bot: N/A (DM)")
+    
     print(f"   Timestamp: {datetime.now().strftime('%H:%M:%S')}")
     print("="*50)
     
-    # Logga anche su file
-    logger.info(f"MSG: {message.author} in #{message.channel.name}: '{message.content[:100]}...'")
+    # Logga anche su file (in modo sicuro)
+    safe_channel = getattr(message.channel, 'name', 'DM')
+    logger.info(f"MSG: {message.author} in #{safe_channel}: '{message.content[:50]}...'")
     
     # ==================== LOGICA PRINCIPALE ====================
     # Ignora messaggi del bot stesso
@@ -851,9 +877,9 @@ async def on_message(message):
         print("   ⏭️ È un comando, esco (non processare come messaggio normale)")
         return
     
-    # Ignora messaggi in DM (se vuoi, altrimenti commenta)
+    # Ignora messaggi in DM (vogliamo solo nei server)
     if not message.guild:
-        print("   ⏭️ Messaggio in DM, ignoro")
+        print("   ⏭️ Messaggio in DM, ignoro (il bot funziona solo nei server)")
         return
     
     print("   ➡️ PROCESSO COME MESSAGGIO NORMALE...")
@@ -963,6 +989,13 @@ async def on_message(message):
                 elapsed = time.time() - start_time
                 print(f"   ✅ Risposta ricevuta in {elapsed:.2f} secondi")
                 
+                # Verifica che la risposta non sia vuota
+                if not response or not response.text:
+                    print(f"   ⚠️ Risposta vuota da Gemini")
+                    await message.channel.send("⚠️ L'AI ha restituito una risposta vuota. Riprova.")
+                    add_credits(user_id, cost)
+                    return
+                
                 ai_response = response.text
                 print(f"   📄 Risposta AI: {len(ai_response)} caratteri")
                 print(f"   📝 Anteprima: {ai_response[:100]}...")
@@ -1006,6 +1039,8 @@ async def on_message(message):
                     await message.channel.send("❌ Errore di autorizzazione API. Contatta l'admin.")
                 elif "invalid" in error_msg.lower():
                     await message.channel.send("❌ API key non valida.")
+                elif "not found" in error_msg.lower() or "404" in error_msg:
+                    await message.channel.send("❌ Modello AI non trovato. Verifica la configurazione.")
                 else:
                     await message.channel.send("🔴 Servizio temporaneamente non disponibile. Riprova.")
                 
@@ -1024,7 +1059,6 @@ async def addcredits_admin(ctx, user_id: int, amount: int):
     
     new_balance = add_credits(user_id, amount)
     await ctx.send(f"✅ Added {amount} credits to {user_id}\nNew balance: {new_balance}")
-    logger.info(f"Admin {ctx.author} added {amount} credits to {user_id}")
 
 @bot.command(name='stats')
 async def stats_admin(ctx):
