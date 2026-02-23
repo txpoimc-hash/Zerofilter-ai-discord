@@ -1,4 +1,4 @@
-# discord_bot.py - VERSIONE CON GEMINI-2.5-FLASH (SENZA DIAGNOSI)
+# discord_bot.py - VERSIONE FINALE CON DEBUG COMPLETO
 import os
 import json
 import asyncio
@@ -34,27 +34,38 @@ def setup_logging():
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
+    # File handler per errori
     file_handler = logging.FileHandler('logs/bot_errors.log')
     file_handler.setLevel(logging.ERROR)
     
+    # File handler per debug
     debug_handler = logging.FileHandler('logs/bot_debug.log')
     debug_handler.setLevel(logging.DEBUG)
     
+    # File handler per messaggi (NUOVO!)
+    messages_handler = logging.FileHandler('logs/messages.log')
+    messages_handler.setLevel(logging.INFO)
+    
+    # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
+    # Formatter
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     file_handler.setFormatter(formatter)
     debug_handler.setFormatter(formatter)
+    messages_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     
+    # Configura root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(debug_handler)
+    root_logger.addHandler(messages_handler)
     root_logger.addHandler(console_handler)
     
     return root_logger
@@ -735,7 +746,7 @@ async def test_api(ctx):
     for i, key in enumerate(GEMINI_API_KEYS):
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-2.5-flash')  # 🔥 CAMBIATO IN 2.5!
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             response = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(
@@ -793,7 +804,7 @@ async def slash_italian(interaction: discord.Interaction):
     user_preferences[user_id]['language'] = 'italian'
     await interaction.response.send_message("🇮🇹 Italiano attivato!")
 
-# ==================== FUNZIONI AI ====================
+# ==================== FUNZIONI AI CON DEBUG COMPLETO ====================
 def get_system_prompt_and_params(user_id):
     pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
     language = pref.get('language', 'english')
@@ -808,59 +819,123 @@ def get_system_prompt_and_params(user_id):
 
 @bot.event
 async def on_message(message):
+    # ==================== DEBUG COMPLETO ====================
+    print(f"\n🔍🔍🔍 DEBUG MESSAGGIO RICEVUTO 🔍🔍🔍")
+    print(f"   Autore: {message.author} (ID: {message.author.id})")
+    print(f"   È un bot? {message.author.bot}")
+    print(f"   Contenuto: '{message.content}'")
+    print(f"   Inizia con '!': {message.content.startswith('!')}")
+    print(f"   Canale: #{message.channel.name if message.channel else 'DM'} (ID: {message.channel.id if message.channel else 'N/A'})")
+    print(f"   Server: {message.guild.name if message.guild else 'DM'} (ID: {message.guild.id if message.guild else 'N/A'})")
+    print(f"   Tipo canale: {message.channel.type}")
+    print(f"   Permessi bot in questo canale: {message.channel.permissions_for(message.guild.me) if message.guild else 'N/A'}")
+    print(f"   Timestamp: {datetime.now().strftime('%H:%M:%S')}")
+    print("="*50)
+    
+    # Logga anche su file
+    logger.info(f"MSG: {message.author} in #{message.channel.name}: '{message.content[:100]}...'")
+    
+    # ==================== LOGICA PRINCIPALE ====================
+    # Ignora messaggi del bot stesso
     if message.author.bot:
+        print("   ⏭️ Ignorato: il messaggio è di un bot")
         return
     
+    # Processa i comandi (quelli che iniziano con !)
+    print("   🔄 Chiamata a bot.process_commands...")
     await bot.process_commands(message)
+    print("   ✅ Comandi processati")
     
+    # Se è un comando, esci (per non processare due volte)
     if message.content.startswith('!'):
+        print("   ⏭️ È un comando, esco (non processare come messaggio normale)")
         return
     
+    # Ignora messaggi in DM (se vuoi, altrimenti commenta)
     if not message.guild:
+        print("   ⏭️ Messaggio in DM, ignoro")
         return
     
+    print("   ➡️ PROCESSO COME MESSAGGIO NORMALE...")
+    
+    # Rate limiting per messaggi normali
     user_id = message.author.id
     now = time.time()
     
     if not hasattr(bot, 'last_message_time'):
         bot.last_message_time = {}
+        print("   📊 Inizializzato last_message_time")
     
     if user_id in bot.last_message_time:
-        if now - bot.last_message_time[user_id] < 2:
+        time_diff = now - bot.last_message_time[user_id]
+        print(f"   ⏱️ Ultimo messaggio di questo utente: {time_diff:.1f} secondi fa")
+        if time_diff < 2:
+            print(f"   ⏭️ Rate limit: troppo presto (limite 2 secondi)")
             return
+    else:
+        print(f"   📊 Primo messaggio di questo utente")
     
     bot.last_message_time[user_id] = now
+    print(f"   ✅ Timestamp aggiornato: {now}")
+    
     user_text = message.content
+    print(f"   📝 Testo da processare: '{user_text[:100]}...' (lunghezza: {len(user_text)})")
     
     if len(user_text.strip()) < 2:
+        print(f"   ⏭️ Testo troppo corto (minimo 2 caratteri)")
         return
     
+    print(f"   🔍 Inizio elaborazione AI...")
+    
     try:
+        # Ottieni preferenze utente
         pref = user_preferences.get(user_id, {'language': 'english', 'mode': 'uncensored'})
+        language = pref.get('language', 'english')
         mode = pref.get('mode', 'uncensored')
         cost = 2 if mode in ['uncensored', 'creative'] else 3
+        print(f"   👤 Preferenze utente - Lingua: {language}, Modalità: {mode}, Costo: {cost}")
         
+        # Controlla crediti
         credits = get_user_credits(user_id)
+        print(f"   💰 Crediti utente: {credits}")
+        
         if credits < cost:
+            print(f"   ❌ Crediti insufficienti: {credits} < {cost}")
             await message.channel.send(f"❌ Need {cost} credits! Use `!buy`")
             return
         
+        # Deduci crediti
         success, remaining = deduct_credits(user_id, cost)
         if not success:
+            print(f"   ❌ Transazione crediti fallita")
             return
         
+        print(f"   ✅ Crediti detratti, rimanenti: {remaining}")
+        
+        # Mostra che sta scrivendo
         async with message.channel.typing():
+            print(f"   ⌨️ Bot sta scrivendo...")
+            
+            # Ottieni API key
             api_key = api_key_manager.get_key()
             if not api_key:
+                print(f"   ❌ Nessuna API key disponibile")
                 await message.channel.send("🚨 API keys temporarily unavailable.")
                 add_credits(user_id, cost)
                 return
             
+            print(f"   🔑 API key usata: {api_key[:10]}...")
+            
             try:
+                # Configura Gemini
+                print(f"   ⚙️ Configurazione Gemini...")
                 genai.configure(api_key=api_key)
                 system_prompt, ai_params = get_system_prompt_and_params(user_id)
+                print(f"   📋 System prompt pronto ({len(system_prompt)} caratteri)")
+                print(f"   🎛️ Parametri AI: temp={ai_params['temperature']}, max_tokens={ai_params['max_output_tokens']}")
                 
-                # 🔥 MODELLO CAMBIATO IN gemini-2.5-flash
+                # Crea modello
+                print(f"   🤖 Creazione modello gemini-2.5-flash...")
                 model = genai.GenerativeModel(
                     'gemini-2.5-flash',
                     generation_config=genai.types.GenerationConfig(
@@ -871,6 +946,11 @@ async def on_message(message):
                     ),
                     safety_settings=SAFETY_SETTINGS
                 )
+                print(f"   ✅ Modello creato")
+                
+                # Chiamata a Gemini con timeout
+                print(f"   🌐 Invio richiesta a Gemini (timeout 30s)...")
+                start_time = time.time()
                 
                 response = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
@@ -880,32 +960,60 @@ async def on_message(message):
                     timeout=30.0
                 )
                 
-                ai_response = response.text
-                api_key_manager.mark_success(api_key)
+                elapsed = time.time() - start_time
+                print(f"   ✅ Risposta ricevuta in {elapsed:.2f} secondi")
                 
+                ai_response = response.text
+                print(f"   📄 Risposta AI: {len(ai_response)} caratteri")
+                print(f"   📝 Anteprima: {ai_response[:100]}...")
+                
+                # Marca come successo
+                api_key_manager.mark_success(api_key)
+                print(f"   ✅ API key marcata come successo")
+                
+                # Gestione risposte lunghe
                 if len(ai_response) <= 1900:
+                    print(f"   📨 Invio risposta (singolo messaggio)")
                     await message.channel.send(f"{ai_response}\n\n💳 Cost: {cost} | Balance: {remaining}")
                 else:
+                    print(f"   📨 Invio risposta in {len(ai_response)//1900 + 1} parti")
                     parts = [ai_response[i:i+1900] for i in range(0, len(ai_response), 1900)]
                     for i, part in enumerate(parts):
                         if i == len(parts) - 1:
+                            print(f"      📨 Parte {i+1}/{len(parts)} (finale)")
                             await message.channel.send(f"{part}\n\n💳 Cost: {cost} | Balance: {remaining}")
                         else:
+                            print(f"      📨 Parte {i+1}/{len(parts)}")
                             await message.channel.send(part)
-                            
+                
+                print(f"   ✅ Messaggio inviato con successo")
+                
             except asyncio.TimeoutError:
+                print(f"   ⏳ TIMEOUT: Richiesta a Gemini troppo lunga")
                 api_key_manager.mark_failed(api_key, "Timeout")
-                await message.channel.send("⏳ Richiesta troppo lunga, riprova.")
+                await message.channel.send("⏳ Richiesta troppo lunga, riprova con un messaggio più breve.")
                 add_credits(user_id, cost)
                 
             except Exception as api_error:
                 error_msg = str(api_error)
+                print(f"   🔴 ERRORE API: {error_msg[:200]}")
                 api_key_manager.mark_failed(api_key, error_msg)
-                await message.channel.send("🔴 Servizio non disponibile. Riprova.")
+                
+                # Messaggi utente più specifici
+                if "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                    await message.channel.send("⚠️ Limite API raggiunto. Riprova tra qualche minuto.")
+                elif "permission" in error_msg.lower() or "access" in error_msg.lower():
+                    await message.channel.send("❌ Errore di autorizzazione API. Contatta l'admin.")
+                elif "invalid" in error_msg.lower():
+                    await message.channel.send("❌ API key non valida.")
+                else:
+                    await message.channel.send("🔴 Servizio temporaneamente non disponibile. Riprova.")
+                
                 add_credits(user_id, cost)
                 
     except Exception as e:
-        logger.error(f"❌ Errore: {str(e)}")
+        print(f"   ❌ ERRORE GENERALE in on_message: {str(e)}")
+        logger.error(f"❌ Errore in on_message: {str(e)}", exc_info=True)
 
 # ==================== COMANDI ADMIN ====================
 @bot.command(name='addcredits')
@@ -916,6 +1024,7 @@ async def addcredits_admin(ctx, user_id: int, amount: int):
     
     new_balance = add_credits(user_id, amount)
     await ctx.send(f"✅ Added {amount} credits to {user_id}\nNew balance: {new_balance}")
+    logger.info(f"Admin {ctx.author} added {amount} credits to {user_id}")
 
 @bot.command(name='stats')
 async def stats_admin(ctx):
@@ -929,10 +1038,50 @@ async def stats_admin(ctx):
     
     embed = discord.Embed(title="📊 STATS", color=discord.Color.gold())
     embed.add_field(name="👥 Utenti", value=total_users)
-    embed.add_field(name="💰 Crediti", value=total_credits)
-    embed.add_field(name="🔑 API Keys", value=f"{stats['active_keys']}/{stats['total_keys']}")
+    embed.add_field(name="💰 Crediti totali", value=total_credits)
+    embed.add_field(name="🔑 API Keys attive", value=f"{stats['active_keys']}/{stats['total_keys']}")
+    embed.add_field(name="❌ API Keys fallite", value=stats['failed_keys'])
     
     await ctx.send(embed=embed)
+
+@bot.command(name='guilds')
+async def guilds_admin(ctx):
+    if ctx.author.id != ADMIN_ID:
+        return
+    
+    guilds_list = []
+    for guild in bot.guilds:
+        guilds_list.append(f"• {guild.name} (ID: {guild.id}) - {guild.member_count} members")
+    
+    guilds_text = "\n".join(guilds_list) if guilds_list else "Nessun server"
+    
+    if len(guilds_text) > 1900:
+        parts = [guilds_text[i:i+1900] for i in range(0, len(guilds_text), 1900)]
+        for i, part in enumerate(parts):
+            await ctx.send(f"**Server {i+1}/{len(parts)}:**\n{part}")
+    else:
+        await ctx.send(f"**Server connessi ({len(bot.guilds)}):**\n{guilds_text}")
+
+# ==================== COMANDO PER VEDERE I LOG (SOLO ADMIN) ====================
+@bot.command(name='logs')
+async def view_logs(ctx, lines: int = 20):
+    """Mostra gli ultimi log (solo admin)"""
+    if ctx.author.id != ADMIN_ID:
+        await ctx.send("❌ No permission")
+        return
+    
+    try:
+        with open('logs/bot_debug.log', 'r') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:]
+            log_text = "".join(last_lines)
+            
+            if len(log_text) > 1900:
+                log_text = log_text[-1900:]
+            
+            await ctx.send(f"📋 Ultimi {lines} log:\n```\n{log_text}\n```")
+    except Exception as e:
+        await ctx.send(f"❌ Errore lettura log: {e}")
 
 # ==================== AVVIO BOT ====================
 if __name__ == '__main__':
@@ -941,12 +1090,17 @@ if __name__ == '__main__':
     logger.info(f"🔑 Loaded {len(GEMINI_API_KEYS)} API Keys")
     logger.info("✨ 4 FREE Credits for New Users!")
     logger.info("🛡️ Anti-kick protection: ACTIVE")
+    logger.info("⚙️ Rate limiting: ACTIVE")
     logger.info("🤖 Modello: gemini-2.5-flash")
+    logger.info("📊 Debug mode: COMPLETO (tutti i messaggi vengono loggati)")
     logger.info("="*50)
     
     if not DISCORD_TOKEN:
         logger.critical("❌ DISCORD_TOKEN mancante!")
         exit(1)
     
+    # Aggiungi il cog AntiKickProtection
     asyncio.run(bot.add_cog(AntiKickProtection(bot)))
+    
+    # Avvia il bot
     bot.run(DISCORD_TOKEN, log_handler=None)
