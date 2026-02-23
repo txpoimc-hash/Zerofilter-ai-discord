@@ -80,7 +80,7 @@ import google.generativeai as genai
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
 CHANNEL_LINK = "https://discord.gg/tuo_server"  # CAMBIA CON IL TUO LINK
 PAYPAL_LINK = "https://www.paypal.me/BotAi36"
-ADMIN_ID = 1311131640  # IL TUO ID DISCORD
+ADMIN_ID = 1432313965916196977  # IL TUO ID DISCORD
 
 # 🔑 MULTI-API KEY SYSTEM CON GESTIONE MIGLIORATA
 GEMINI_API_KEYS = [
