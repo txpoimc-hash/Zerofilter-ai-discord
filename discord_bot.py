@@ -1,4 +1,4 @@
-# discord_bot.py - VERSIONE FINALE CON SUPPORTO DM E SERVER
+# discord_bot.py - VERSIONE FINALE CON THREAD PRIVATI E COMANDO DM
 import os
 import json
 import asyncio
@@ -280,7 +280,7 @@ class AntiKickProtection(commands.Cog):
         )
         logger.info(f"🌐 In {len(self.bot.guilds)} server")
         
-        # Sincronizza i comandi slash (FIX per 404 Unknown interaction)
+        # Sincronizza i comandi slash
         try:
             synced = await self.bot.tree.sync()
             logger.info(f"✅ Sincronizzati {len(synced)} comandi slash")
@@ -316,7 +316,11 @@ class AntiKickProtection(commands.Cog):
                     "• 🔓 Modalità uncensored\n"
                     "• 🎨 Scrittura creativa\n"
                     "• ⚡ Supporto tecnico\n\n"
-                    "**Comandi:** `!help`"
+                    "**Comandi principali:**\n"
+                    "• `/chat` - Crea un thread privato per chattare\n"
+                    "• `/dm` - Avvia una chat in DM\n"
+                    "• `!help` - Lista comandi completa\n\n"
+                    "✨ **Usami in privato per conversazioni riservate!**"
                 ),
                 color=discord.Color.green()
             )
@@ -398,6 +402,134 @@ bot.remove_command('help')
 rate_limiter = RateLimiter()
 user_preferences = {}
 
+# ==================== NUOVI COMANDI PER CHAT PRIVATA ====================
+@bot.tree.command(name="chat", description="Avvia una chat privata con il bot (thread riservato)")
+async def private_chat(interaction: discord.Interaction):
+    """Crea un thread privato per chat con il bot - visibile solo all'utente"""
+    
+    if not interaction.guild:
+        await interaction.response.send_message("❌ Questo comando funziona solo nei server!", ephemeral=True)
+        return
+    
+    # Nome del thread con l'username
+    thread_name = f"🤖 {interaction.user.name}"
+    
+    try:
+        # Crea thread privato (solo l'utente e il bot possono vederlo)
+        thread = await interaction.channel.create_thread(
+            name=thread_name,
+            type=discord.ChannelType.private_thread,  # 🔥 PRIVATE THREAD!
+            auto_archive_duration=60  # Si archivia dopo 60 minuti di inattività
+        )
+        
+        # Aggiungi l'utente al thread
+        await thread.add_user(interaction.user)
+        
+        # Crediti dell'utente
+        credits = get_user_credits(interaction.user.id)
+        
+        # Messaggio di benvenuto nel thread
+        embed = discord.Embed(
+            title="🤖 Chat Privata Avviata",
+            description=(
+                f"Ciao {interaction.user.mention}! 🎉\n\n"
+                "Questa è una **chat privata**. Solo tu e il bot potete vedere questi messaggi.\n\n"
+                f"💰 **I tuoi crediti:** {credits}\n"
+                "🎁 4 crediti gratis per iniziare!\n\n"
+                "**Come funziona:**\n"
+                "• Scrivi normalmente in questo thread e ti risponderò\n"
+                "• Usa `!help` per tutti i comandi\n"
+                "• Usa `!italian` per italiano / `!english` per inglese\n\n"
+                "**Modalità disponibili:**\n"
+                "• `!uncensored` - 😈 Senza censura (2 crediti)\n"
+                "• `!creative` - 🎨 Creativa (2 crediti)\n"
+                "• `!technical` - ⚡ Tecnica (3 crediti)\n\n"
+                "**Esempi:**\n"
+                "• 'Raccontami una storia'\n"
+                "• 'Spiegami Python'\n"
+                "• 'Scrivi una poesia'\n\n"
+                "Il thread si chiuderà automaticamente dopo 60 minuti di inattività.\n\n"
+                "✨ **Buon divertimento!**"
+            ),
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Chat privata - Solo tu puoi vedere")
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        
+        await thread.send(embed=embed)
+        
+        # Risposta ephemeral nel canale originale
+        await interaction.response.send_message(
+            f"✅ **Thread privato creato!** Vai qui: {thread.mention}\n*(solo tu puoi vederlo)*",
+            ephemeral=True
+        )
+        
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Errore durante la creazione del thread: {e}", ephemeral=True)
+
+@bot.tree.command(name="dm", description="Avvia una chat privata con il bot in DM")
+async def dm_command(interaction: discord.Interaction):
+    """Invia un messaggio in DM all'utente per iniziare la chat privata"""
+    
+    # Risposta immediata (ephemeral = solo l'utente la vede)
+    await interaction.response.send_message(
+        "📩 **Ti sto inviando un messaggio in privato...**",
+        ephemeral=True
+    )
+    
+    try:
+        # Crediti dell'utente
+        credits = get_user_credits(interaction.user.id)
+        
+        # Crea un embed professionale per il DM
+        embed = discord.Embed(
+            title="🤖 Chat Privata con AI ZeroFilter",
+            description=(
+                f"Ciao {interaction.user.mention}! 🎉\n\n"
+                "Grazie per avermi contattato in privato! Ecco come funziona:\n\n"
+                "**📝 Come usarmi:**\n"
+                "• Scrivi normalmente in questo DM e ti risponderò\n"
+                "• Usa `!help` per tutti i comandi\n"
+                "• Usa `!italian` per italiano / `!english` per inglese\n\n"
+                f"💰 **I tuoi crediti:** {credits}\n"
+                "🎁 4 crediti gratis per iniziare!\n\n"
+                "**Modalità disponibili:**\n"
+                "• `!uncensored` - 😈 Senza censura (2 crediti)\n"
+                "• `!creative` - 🎨 Creativa (2 crediti)\n"
+                "• `!technical` - ⚡ Tecnica (3 crediti)\n\n"
+                "**Esempi:**\n"
+                "• 'Raccontami una storia'\n"
+                "• 'Spiegami Python'\n"
+                "• 'Scrivi una poesia'\n\n"
+                "✨ **Buon divertimento!**"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Rispondi in questo DM quando vuoi!")
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        
+        # Invia il messaggio in DM
+        await interaction.user.send(embed=embed)
+        
+        # Messaggio di conferma (già mandato all'inizio, ma possiamo aggiungere un followup)
+        await interaction.followup.send(
+            "✅ **Messaggio inviato!** Controlla i tuoi DM.",
+            ephemeral=True
+        )
+        
+    except discord.Forbidden:
+        # Se l'utente ha bloccato i DM, avvisalo
+        await interaction.followup.send(
+            "❌ **Non posso inviarti messaggi privati!**\n"
+            "Per favore, abilita i DM dal server:\n"
+            "1. Vai in **Impostazioni Server** → **Privacy**\n"
+            "2. Attiva **'Consenti messaggi privati dal server'**\n"
+            "3. Riprova il comando `/dm`",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ Errore: {e}", ephemeral=True)
+
 # ==================== COMANDI PREFIX (!) ====================
 @bot.command(name='start')
 async def start(ctx):
@@ -435,6 +567,10 @@ async def start(ctx):
 `!uncensored` - 😈 ULTRA UNCENSORED (2 credits)
 `!creative` - 🎨 Creative writing (2 credits)
 `!technical` - ⚡ Technical expert (3 credits)
+
+**Chat Privata:**
+`/chat` - Crea thread privato
+`/dm` - Avvia chat in DM
     """, inline=False)
     embed.set_footer(text=f"User ID: {user_id}")
     
@@ -466,6 +602,10 @@ async def help_cmd(ctx):
 `!btc` - Bitcoin payment
 `!eth` - Ethereum payment
 `!status` - Check API status
+    """, inline=False)
+    embed.add_field(name="💬 Chat Privata", value="""
+`/chat` - Crea un thread privato (solo tu vedi)
+`/dm` - Avvia chat in DM
     """, inline=False)
     embed.add_field(name="⚡ Features", value="""
 • Multi-API System for reliability
@@ -764,7 +904,7 @@ async def slash_start(interaction: discord.Interaction):
     user_id = interaction.user.id
     credits = get_user_credits(user_id)
     embed = discord.Embed(title="🤖 AI ZeroFilter", description=f"💰 Credits: {credits}")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="english", description="Switch to English")
 async def slash_english(interaction: discord.Interaction):
@@ -772,7 +912,7 @@ async def slash_english(interaction: discord.Interaction):
     if user_id not in user_preferences:
         user_preferences[user_id] = {}
     user_preferences[user_id]['language'] = 'english'
-    await interaction.response.send_message("🌎 English activated!")
+    await interaction.response.send_message("🌎 English activated!", ephemeral=True)
 
 @bot.tree.command(name="italian", description="Passa all'italiano")
 async def slash_italian(interaction: discord.Interaction):
@@ -780,17 +920,17 @@ async def slash_italian(interaction: discord.Interaction):
     if user_id not in user_preferences:
         user_preferences[user_id] = {}
     user_preferences[user_id]['language'] = 'italian'
-    await interaction.response.send_message("🇮🇹 Italiano attivato!")
+    await interaction.response.send_message("🇮🇹 Italiano attivato!", ephemeral=True)
 
 @bot.tree.command(name="credits", description="Check your credits")
 async def slash_credits(interaction: discord.Interaction):
     user_id = interaction.user.id
     credits = get_user_credits(user_id)
-    await interaction.response.send_message(f"💰 You have {credits} credits")
+    await interaction.response.send_message(f"💰 You have {credits} credits", ephemeral=True)
 
 @bot.tree.command(name="myid", description="Get your User ID")
 async def slash_myid(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`")
+    await interaction.response.send_message(f"🆔 Your ID: `{interaction.user.id}`", ephemeral=True)
 
 # ==================== FUNZIONI AI ====================
 def get_system_prompt_and_params(user_id):
@@ -805,7 +945,7 @@ def get_system_prompt_and_params(user_id):
     full_prompt = f"{UNCENSORED_PROMPT}\n\n{language_instructions[language]}"
     return full_prompt, GENERATION_CONFIG.copy()
 
-# ==================== ON_MESSAGE CORRETTO (supporta DM e Server) ====================
+# ==================== ON_MESSAGE (supporta DM, Server e Thread) ====================
 @bot.event
 async def on_message(message):
     # ==================== DEBUG INIZIALE ====================
@@ -820,6 +960,10 @@ async def on_message(message):
     
     guild_name = getattr(message.guild, 'name', 'DM Privato')
     print(f"   Server: {guild_name}")
+    
+    # Tipo di canale (utile per debug)
+    channel_type = "Thread" if isinstance(message.channel, discord.Thread) else "Canale normale" if message.guild else "DM"
+    print(f"   Tipo: {channel_type}")
     print("="*50)
     
     # Log su file
@@ -859,8 +1003,8 @@ async def on_message(message):
         print("   ⏭️ Testo troppo corto")
         return
     
-    # ==================== VERIFICA PERMESSI (solo se in server) ====================
-    if message.guild:
+    # ==================== VERIFICA PERMESSI (solo se in server e non in DM) ====================
+    if message.guild and not isinstance(message.channel, discord.Thread):
         permissions = message.channel.permissions_for(message.guild.me)
         print(f"   🔑 Permessi in #{channel_name}: send={permissions.send_messages}, read={permissions.read_messages}")
         
@@ -996,7 +1140,8 @@ if __name__ == '__main__':
     logger.info("✨ 4 FREE Credits for New Users!")
     logger.info("🛡️ Anti-kick protection: ACTIVE")
     logger.info("🤖 Modello: gemini-2.5-flash")
-    logger.info("📱 Supporto DM: ATTIVO")
+    logger.info("💬 Thread privati: ATTIVO (/chat)")
+    logger.info("📱 Supporto DM: ATTIVO (/dm)")
     logger.info("="*50)
     
     if not DISCORD_TOKEN:
